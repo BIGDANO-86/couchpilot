@@ -33,8 +33,17 @@ user's startup so it is there after a reboot; turn that off in the settings.
 
 ## Settings
 
-Settings live in `%APPDATA%\CouchPilot\config.json`. Edit, then
-right-click the tray icon → **Reload settings**.
+Right-click the tray icon → **Settings**, or double-click the icon. The window
+opens by itself the first time, and any time no frontend could be detected.
+
+It shows live status while you work: whether a controller is connected right
+now, whether the frontend is running, whether your controller is armed to wake
+the PC, and which sleep state your machine actually supports. There are **Try
+it** buttons for launching and sleeping, and a **Test** button on each webhook,
+so you can confirm everything without waiting for the real thing to happen.
+
+Everything is still plain JSON at `%APPDATA%\CouchPilot\config.json` if you
+prefer, with **Reload config file** on the tray menu to pick up hand edits.
 
 | Setting | Default | What it does |
 | --- | --- | --- |
@@ -51,6 +60,8 @@ right-click the tray icon → **Reload settings**.
 | `WebhookOnLaunch` | empty | POSTed when a launch is triggered. |
 | `WebhookOnExit` | empty | POSTed when the frontend quits. |
 | `StartWithWindows` | `true` | Adds a `Run` key entry for your user. |
+| `ShowNotifications` | `true` | Brief tray notification when something happens. |
+| `LaunchOnWakeWithController` | `false` | Also launch if the PC resumes with a pad already on. See below. |
 
 ### Why `WatchProcessName` exists
 
@@ -70,6 +81,39 @@ Both Big Box and Playnite do expose an exact shutdown event
 using them may ship later for people who want the precise signal. The exit code
 covers it without one.
 
+## Controller wake
+
+Waking a sleeping PC with a controller is widely assumed to be purely a
+hardware trait. It is not. The device must also be **armed** in Windows, and it
+often is not by default.
+
+CouchPilot reports the state and can fix it: **Settings → Set up controller
+wake**. It finds receivers that are capable of waking the PC but not armed, and
+arms them with `powercfg -deviceenablewake`. Windows asks for administrator
+rights for that one action, which is why the app itself does not run elevated.
+
+Things that genuinely are hardware limits:
+
+- Wired pads usually cannot wake a PC at all.
+- An **Xbox Wireless Adapter** or a Bluetooth receiver generally can.
+- Some motherboards gate it behind a BIOS option, often called *USB wake* or
+  *wake on USB*. If arming succeeds but nothing happens, check there.
+
+**Modern Standby** machines, which report `S0 Low Power Idle` rather than
+`Standby (S3)`, never fully sleep and behave differently. The settings window
+tells you which kind you have.
+
+### Why waking is a separate thing from launching
+
+On a normal controller wake, the pad goes from absent to present, which is what
+triggers a launch. That works because sleeping deliberately re-arms that
+baseline first.
+
+`LaunchOnWakeWithController` covers a different case: the PC resumes for some
+other reason while a pad happens to already be connected. It is **off** by
+default on purpose, because otherwise waking the machine with a keyboard at
+your desk would switch your TV over and open your frontend uninvited.
+
 ## Troubleshooting
 
 The log is at `%APPDATA%\CouchPilot\couchpilot.log`, reachable from the tray
@@ -82,6 +126,25 @@ nobody is looking at the screen.
 | Nothing happens when the controller comes on | It was already on. It fires on the transition, not on presence. Switch it off, wait, switch it on. |
 | PC does not sleep on quit | Check the log for the exit code. A non-zero code is treated as a crash by default. |
 | Frontend opens at every boot | A controller connected at startup is deliberately ignored; if it still happens, check the log for the baseline line. |
+
+## Ideas not yet built
+
+Open to opinions on which of these are actually worth having:
+
+- **Sleep from the pad.** Hold a button combination, say Back and Start for
+  three seconds, to sleep without reaching for the frontend's exit. Removes the
+  last reason to touch a keyboard.
+- **Do not sleep while a game is running.** Big Box and Playnite minimise
+  behind a game rather than exiting, so this is only a safeguard for odd setups.
+- **Several frontends.** Pick which one to open, or offer a chooser when a pad
+  connects.
+- **Update check** against this repo's releases, with a tray prompt.
+- **Launch something when the pad disconnects**, for people who want the
+  opposite behaviour.
+- **MQTT** as an alternative to webhooks, for Home Assistant users who prefer it.
+- **Per-frontend plugins** using the exact shutdown events
+  (`BigBoxShutdownBeginning`, `OnApplicationStopped`) for anyone who wants a
+  signal more precise than an exit code.
 
 ## Build it yourself
 
