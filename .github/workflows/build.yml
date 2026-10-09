@@ -82,14 +82,22 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           $tag = "v${{ steps.ver.outputs.version }}"
-          gh release view $tag 2>$null | Out-Null
-          if ($LASTEXITCODE -eq 0) {
-            Write-Host "$tag already published, nothing to do"
+          gh release view $tag *> $null
+          $exists = ($LASTEXITCODE -eq 0)
+
+          # gh leaves a non-zero exit code behind when the release is absent,
+          # and the pwsh wrapper fails the whole step on it even though nothing
+          # went wrong. Clear it and exit deliberately.
+          $global:LASTEXITCODE = 0
+
+          if ($exists) {
+            Write-Host "$tag is already published, nothing to do"
             "needed=false" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
           } else {
-            Write-Host "$tag not published yet"
+            Write-Host "$tag is not published yet"
             "needed=true" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
           }
+          exit 0
 
       - name: Publish the release
         if: github.ref == 'refs/heads/main' && steps.check.outputs.needed == 'true'
