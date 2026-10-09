@@ -10,10 +10,16 @@
     <RootNamespace>CouchPilot</RootNamespace>
     <Version>0.1.0</Version>
     <Product>CouchPilot</Product>
-    <Description>Launches your game frontend when you switch a controller on, and sleeps the PC when you exit it.</Description>
+    <Company>CouchPilot</Company>
+    <Description>Switch your controller on and your game frontend opens. Quit it and your PC sleeps.</Description>
     <ApplicationManifest>app.manifest</ApplicationManifest>
+    <ApplicationIcon>assets\couchpilot.ico</ApplicationIcon>
     <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
   </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="MQTTnet" Version="4.3.7.1207" />
+  </ItemGroup>
 
   <!-- Single self-contained exe so users need no .NET runtime installed. -->
   <PropertyGroup Condition="'$(Configuration)'=='Release'">

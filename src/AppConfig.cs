@@ -1,104 +1,160 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 
 namespace CouchPilot
 {
+    internal enum DisconnectAction { None = 0, Run = 1, Sleep = 2 }
+
+    internal sealed class MqttSettings
+    {
+        public bool Enabled { get; set; } = false;
+        public string Host { get; set; } = "";
+        public int Port { get; set; } = 1883;
+        public string Username { get; set; } = "";
+        public string Password { get; set; } = "";
+        public string ClientId { get; set; } = "couchpilot";
+        public string TopicLaunch { get; set; } = "couchpilot/launch";
+        public string TopicExit { get; set; } = "couchpilot/exit";
+        public string PayloadLaunch { get; set; } = "ON";
+        public string PayloadExit { get; set; } = "OFF";
+        public bool Retain { get; set; } = false;
+    }
+
     internal sealed class AppConfig
     {
-        // ---- what to launch
-        public string FrontendPath { get; set; } = "";
+        // ---- frontends
+        public List<FrontendEntry> Frontends { get; set; } = new List<FrontendEntry>();
 
-        /// <summary>
-        /// The process that actually stays alive, WITHOUT the .exe extension.
-        /// This matters: LaunchBox ships a small BigBox.exe stub that starts the
-        /// real binary and may exit immediately. Watching the stub would look
-        /// like an instant quit, so the long-lived process is tracked instead.
-        /// Leave blank to derive it from FrontendPath.
-        /// </summary>
-        public string WatchProcessName { get; set; } = "";
+        /// <summary>Name of the frontend used when the chooser is off or times out.</summary>
+        public string DefaultFrontend { get; set; } = "";
+
+        /// <summary>Offer a controller-navigable picker when more than one is enabled.</summary>
+        public bool ShowChooser { get; set; } = true;
+
+        /// <summary>The chooser picks the default by itself after this long. 0 waits forever.</summary>
+        public int ChooserTimeoutSeconds { get; set; } = 10;
 
         // ---- behaviour
         public bool LaunchOnControllerConnect { get; set; } = true;
         public bool SleepOnFrontendExit { get; set; } = true;
-
-        /// <summary>Only sleep if the frontend exited cleanly (exit code 0).</summary>
         public bool RequireCleanExit { get; set; } = true;
-
-        /// <summary>Only sleep if a controller is still connected at exit.</summary>
         public bool RequireControllerForSleep { get; set; } = true;
-
-        /// <summary>Ignore an exit that happens sooner than this, to dodge crash loops.</summary>
         public int MinimumRunSeconds { get; set; } = 30;
-
-        /// <summary>Breathing room before sleeping, so webhooks and shutdown screens finish.</summary>
         public int SleepDelaySeconds { get; set; } = 6;
-
         public int ControllerPollSeconds { get; set; } = 2;
-
-        /// <summary>Ignore repeat triggers inside this window.</summary>
         public int CooldownSeconds { get; set; } = 45;
 
-        // ---- optional integrations, invisible to anyone who leaves them blank
+        // ---- what to do when the pad goes away
+        public DisconnectAction OnDisconnect { get; set; } = DisconnectAction.None;
+        public string DisconnectPath { get; set; } = "";
+        public string DisconnectArguments { get; set; } = "";
+
+        /// <summary>
+        /// Controllers idle off after a quarter of an hour or so, so this needs a
+        /// generous wait or putting the pad down mid film would fire it.
+        /// </summary>
+        public int DisconnectDelaySeconds { get; set; } = 120;
+
+        /// <summary>Skip the disconnect action while the frontend is still running.</summary>
+        public bool DisconnectOnlyWhenFrontendClosed { get; set; } = true;
+
+        // ---- optional integrations
         public string WebhookOnLaunch { get; set; } = "";
         public string WebhookOnExit { get; set; } = "";
         public int WebhookTimeoutSeconds { get; set; } = 5;
+        public MqttSettings Mqtt { get; set; } = new MqttSettings();
 
+        // ---- app
         public bool StartWithWindows { get; set; } = true;
-
-        /// <summary>Show a brief tray balloon when something happens.</summary>
         public bool ShowNotifications { get; set; } = true;
-
-        /// <summary>
-        /// Launch when the PC resumes and a controller is already connected.
-        /// Off by default: a resume caused by something else (a keyboard, a
-        /// wake timer) would otherwise launch the frontend unasked. Normal
-        /// controller wakes are already covered by the absent-to-present
-        /// transition, because sleeping re-arms that baseline.
-        /// </summary>
         public bool LaunchOnWakeWithController { get; set; } = false;
-
-        /// <summary>Set once the first-run settings window has been shown.</summary>
         public bool FirstRunDone { get; set; } = false;
 
-        [JsonIgnore]
-        public static string Dir => Log.Dir;
+        // ---- legacy, read once then migrated into Frontends
+        public string FrontendPath { get; set; } = "";
+        public string WatchProcessName { get; set; } = "";
 
-        [JsonIgnore]
-        public static string FilePath => Path.Combine(Dir, "config.json");
+        [JsonIgnore] public static string Dir => Log.Dir;
+        [JsonIgnore] public static string FilePath => Path.Combine(Dir, "config.json");
 
         private static readonly JsonSerializerOptions Opts = new JsonSerializerOptions
         {
             WriteIndented = true,
             ReadCommentHandling = JsonCommentHandling.Skip,
-            AllowTrailingCommas = true
+            AllowTrailingCommas = true,
+            Converters = { new JsonStringEnumConverter() }
         };
 
         public static AppConfig Load()
         {
+            AppConfig cfg = null;
             try
             {
                 if (File.Exists(FilePath))
-                {
-                    var cfg = JsonSerializer.Deserialize<AppConfig>(File.ReadAllText(FilePath), Opts);
-                    if (cfg != null)
-                    {
-                        if (string.IsNullOrWhiteSpace(cfg.FrontendPath))
-                            cfg.FrontendPath = DetectFrontend();
-                        return cfg;
-                    }
-                }
+                    cfg = JsonSerializer.Deserialize<AppConfig>(File.ReadAllText(FilePath), Opts);
             }
             catch (Exception ex)
             {
-                Log.Write("config load failed, using defaults: " + ex.Message);
+                Log.Write("config load failed, starting fresh: " + ex.Message);
             }
 
-            var fresh = new AppConfig { FrontendPath = DetectFrontend() };
-            fresh.Save();
-            return fresh;
+            cfg ??= new AppConfig();
+            cfg.Migrate();
+
+            if (cfg.Frontends.Count == 0)
+            {
+                cfg.Frontends = Frontends.DetectAll();
+                Log.Write($"detected {cfg.Frontends.Count} frontend(s)");
+            }
+
+            cfg.EnsureDefault();
+            cfg.Save();
+            return cfg;
+        }
+
+        /// <summary>Carry a stage-1 single-frontend config forward without losing it.</summary>
+        private void Migrate()
+        {
+            if (string.IsNullOrWhiteSpace(FrontendPath)) return;
+            if (!Frontends.Any(f => string.Equals(f.Path, FrontendPath, StringComparison.OrdinalIgnoreCase)))
+            {
+                var name = "";
+                try { name = Path.GetFileNameWithoutExtension(FrontendPath); } catch { }
+                Frontends.Insert(0, new FrontendEntry
+                {
+                    Name = string.IsNullOrWhiteSpace(name) ? "Frontend" : name,
+                    Path = FrontendPath,
+                    WatchProcess = WatchProcessName
+                });
+                if (string.IsNullOrWhiteSpace(DefaultFrontend)) DefaultFrontend = Frontends[0].Name;
+                Log.Write("migrated the old single-frontend setting into the list");
+            }
+            FrontendPath = "";
+            WatchProcessName = "";
+        }
+
+        public void EnsureDefault()
+        {
+            var enabled = EnabledFrontends();
+            if (enabled.Count == 0) { DefaultFrontend = ""; return; }
+            if (!enabled.Any(f => string.Equals(f.Name, DefaultFrontend, StringComparison.OrdinalIgnoreCase)))
+                DefaultFrontend = enabled[0].Name;
+        }
+
+        public List<FrontendEntry> EnabledFrontends() =>
+            Frontends.Where(f => f.Enabled && f.Exists()).ToList();
+
+        public FrontendEntry Default()
+        {
+            var enabled = EnabledFrontends();
+            if (enabled.Count == 0) return null;
+            return enabled.FirstOrDefault(f =>
+                       string.Equals(f.Name, DefaultFrontend, StringComparison.OrdinalIgnoreCase))
+                   ?? enabled[0];
         }
 
         public void Save()
@@ -108,55 +164,7 @@ namespace CouchPilot
                 Directory.CreateDirectory(Dir);
                 File.WriteAllText(FilePath, JsonSerializer.Serialize(this, Opts));
             }
-            catch (Exception ex)
-            {
-                Log.Write("config save failed: " + ex.Message);
-            }
-        }
-
-        /// <summary>Best-effort guess at an installed frontend, in rough order of likelihood.</summary>
-        public static string DetectFrontend()
-        {
-            var local = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
-            var candidates = new List<string>
-            {
-                @"C:\Launchbox\BigBox.exe",
-                @"C:\LaunchBox\BigBox.exe",
-                @"D:\Launchbox\BigBox.exe",
-                Path.Combine(local, @"Playnite\Playnite.FullscreenApp.exe"),
-                @"C:\Program Files\Playnite\Playnite.FullscreenApp.exe",
-                @"C:\Program Files (x86)\Playnite\Playnite.FullscreenApp.exe"
-            };
-
-            foreach (var c in candidates)
-            {
-                try { if (File.Exists(c)) return c; } catch { }
-            }
-            return "";
-        }
-
-        /// <summary>
-        /// Which process to actually watch. Explicit setting wins; otherwise map
-        /// the known launcher-stub cases, then fall back to the file name.
-        /// </summary>
-        public string ResolveWatchName()
-        {
-            if (!string.IsNullOrWhiteSpace(WatchProcessName))
-                return WatchProcessName.Replace(".exe", "", StringComparison.OrdinalIgnoreCase);
-
-            var name = "";
-            try { name = Path.GetFileNameWithoutExtension(FrontendPath) ?? ""; } catch { }
-
-            // BigBox.exe in the LaunchBox root is a stub; the real process is
-            // also called BigBox, so the name holds. Playnite's fullscreen app
-            // keeps its own name too. Listed explicitly so the intent is clear.
-            switch (name.ToLowerInvariant())
-            {
-                case "bigbox": return "BigBox";
-                case "playnite.fullscreenapp": return "Playnite.FullscreenApp";
-                case "playnite.desktopapp": return "Playnite.DesktopApp";
-                default: return name;
-            }
+            catch (Exception ex) { Log.Write("config save failed: " + ex.Message); }
         }
     }
 }

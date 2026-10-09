@@ -1,5 +1,7 @@
 using System;
+using System.Collections.Generic;
 using System.Diagnostics;
+using System.Linq;
 using System.Drawing;
 using System.IO;
 using System.Threading;
@@ -14,6 +16,21 @@ namespace CouchPilot
         private static NotifyIcon _tray;
         private static Engine _engine;
         private static AppConfig _cfg;
+
+        public static Icon AppIcon { get; private set; }
+
+        public static string VersionString
+        {
+            get
+            {
+                try
+                {
+                    var v = System.Reflection.Assembly.GetExecutingAssembly().GetName().Version;
+                    return v == null ? "0.1.0" : $"{v.Major}.{v.Minor}.{v.Build}";
+                }
+                catch { return "0.1.0"; }
+            }
+        }
 
         [STAThread]
         private static void Main()
@@ -38,13 +55,26 @@ namespace CouchPilot
 
             _engine = new Engine(_cfg);
             _engine.Notify += m => Notify(m);
+            _engine.AskWhich = AskWhichFrontend;
             _engine.Start();
+
+            _hidden = new Form
+            {
+                ShowInTaskbar = false,
+                WindowState = FormWindowState.Minimized,
+                FormBorderStyle = FormBorderStyle.None,
+                Size = new Size(1, 1),
+                StartPosition = FormStartPosition.Manual,
+                Location = new Point(-32000, -32000)
+            };
+            _hidden.Load += (s, e) => _hidden.Hide();
+            _hidden.Show();
 
             BuildTray();
 
-            // First run with nothing detected is the one case where silently
-            // sitting in the tray would look broken, so show the window.
-            if (!_cfg.FirstRunDone || string.IsNullOrWhiteSpace(_cfg.FrontendPath))
+            // First run, or nothing usable detected, is the one case where
+            // sitting silently in the tray would look broken.
+            if (!_cfg.FirstRunDone || _cfg.EnabledFrontends().Count == 0)
                 OpenSettings();
 
             Application.Run();
@@ -113,6 +143,53 @@ namespace CouchPilot
             UpdateTip();
         }
 
+        /// <summary>
+        /// Shows the pad-navigable picker. The engine calls this from a worker
+        /// thread, so it is marshalled onto the UI thread and waited on, because
+        /// the answer decides what gets launched.
+        /// </summary>
+        private static FrontendEntry AskWhichFrontend(List<FrontendEntry> choices, string defaultName, int timeout)
+        {
+            try
+            {
+                FrontendEntry result = null;
+
+                var show = new Action(() =>
+                {
+                    try
+                    {
+                        using var chooser = new ChooserForm(choices, defaultName, timeout);
+                        chooser.ShowDialog();
+                        result = chooser.Chosen;
+                    }
+                    catch (Exception ex)
+                    {
+                        Log.Write("chooser failed, falling back to the default: " + ex.Message);
+                        result = choices.FirstOrDefault(f =>
+                            string.Equals(f.Name, defaultName, StringComparison.OrdinalIgnoreCase)) ?? choices[0];
+                    }
+                });
+
+                if (_tray != null && _hidden != null && _hidden.InvokeRequired)
+                    _hidden.Invoke(show);
+                else
+                    show();
+
+                return result;
+            }
+            catch (Exception ex)
+            {
+                Log.Write("could not ask which frontend: " + ex.Message);
+                return choices.Count > 0 ? choices[0] : null;
+            }
+        }
+
+        /// <summary>
+        /// An invisible window purely to own the UI thread, so worker threads
+        /// have something to Invoke onto even with no settings window open.
+        /// </summary>
+        private static Form _hidden;
+
         private static SettingsForm _settingsWindow;
 
         private static void OpenSettings()
@@ -146,9 +223,10 @@ namespace CouchPilot
         private static void UpdateTip()
         {
             if (_tray == null) return;
-            var what = string.IsNullOrWhiteSpace(_cfg.FrontendPath)
-                ? "no frontend configured"
-                : Path.GetFileNameWithoutExtension(_cfg.FrontendPath);
+            var enabled = _cfg.EnabledFrontends();
+            var what = enabled.Count == 0 ? "no frontend set up"
+                     : enabled.Count == 1 ? enabled[0].Name
+                     : enabled.Count + " frontends";
             // Tooltips are capped at 63 characters by the shell.
             var tip = "CouchPilot" + (_engine.Paused ? " (paused)" : "") + " - " + what;
             _tray.Text = tip.Length > 62 ? tip.Substring(0, 62) : tip;
@@ -172,8 +250,8 @@ namespace CouchPilot
                     catch { }
                 });
 
-                if (_settingsWindow != null && !_settingsWindow.IsDisposed && _settingsWindow.InvokeRequired)
-                    _settingsWindow.BeginInvoke(show);
+                if (_hidden != null && !_hidden.IsDisposed && _hidden.InvokeRequired)
+                    _hidden.BeginInvoke(show);
                 else
                     show();
             }
@@ -188,11 +266,12 @@ namespace CouchPilot
                 if (!string.IsNullOrEmpty(exe))
                 {
                     var ico = Icon.ExtractAssociatedIcon(exe);
-                    if (ico != null) return ico;
+                    if (ico != null) { AppIcon = ico; return ico; }
                 }
             }
             catch { }
-            return SystemIcons.Application;
+            AppIcon = SystemIcons.Application;
+            return AppIcon;
         }
 
         private static void OpenInEditor(string path)
