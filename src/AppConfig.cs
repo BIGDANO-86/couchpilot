@@ -48,6 +48,21 @@ namespace CouchPilot
 
         public bool StartWithWindows { get; set; } = true;
 
+        /// <summary>Show a brief tray balloon when something happens.</summary>
+        public bool ShowNotifications { get; set; } = true;
+
+        /// <summary>
+        /// Launch when the PC resumes and a controller is already connected.
+        /// Off by default: a resume caused by something else (a keyboard, a
+        /// wake timer) would otherwise launch the frontend unasked. Normal
+        /// controller wakes are already covered by the absent-to-present
+        /// transition, because sleeping re-arms that baseline.
+        /// </summary>
+        public bool LaunchOnWakeWithController { get; set; } = false;
+
+        /// <summary>Set once the first-run settings window has been shown.</summary>
+        public bool FirstRunDone { get; set; } = false;
+
         [JsonIgnore]
         public static string Dir => Log.Dir;
 

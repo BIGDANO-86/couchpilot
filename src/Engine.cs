@@ -25,9 +25,48 @@ namespace CouchPilot
 
         public bool Paused { get; set; }
 
+        /// <summary>Raised for anything the user might want to see as a notification.</summary>
+        public event Action<string> Notify;
+
         public Engine(AppConfig cfg) { _cfg = cfg; }
 
         public void UpdateConfig(AppConfig cfg) { _cfg = cfg; }
+
+        private void Say(string message)
+        {
+            Log.Write(message);
+            if (_cfg.ShowNotifications)
+            {
+                try { Notify?.Invoke(message); } catch { }
+            }
+        }
+
+        // ---- entry points for the Try it buttons in the settings window
+        public void TestLaunch() { Log.Write("manual launch requested"); LaunchFrontend(); }
+
+        public void TestSleep()
+        {
+            Log.Write("manual sleep requested");
+            _lastControllerState = false;
+            _lastTrigger = DateTime.MinValue;
+            Task.Run(() => { try { Native.Sleep(); } catch (Exception ex) { Log.Write("sleep failed: " + ex.Message); } });
+        }
+
+        public bool TestWebhook(string url, int timeoutSeconds)
+        {
+            try
+            {
+                using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(Math.Max(1, timeoutSeconds)) };
+                using var resp = http.PostAsync(url, new StringContent("")).GetAwaiter().GetResult();
+                Log.Write("webhook test " + url + " -> " + (resp.IsSuccessStatusCode ? "ok" : "failure status"));
+                return resp.IsSuccessStatusCode;
+            }
+            catch (Exception ex)
+            {
+                Log.Write("webhook test " + url + " failed: " + ex.Message);
+                return false;
+            }
+        }
 
         public void Start()
         {
@@ -36,6 +75,10 @@ namespace CouchPilot
             // frontend.
             _lastControllerState = Native.AnyControllerConnected();
             Log.Write($"engine starting, controller present at start: {_lastControllerState}");
+
+            try { Microsoft.Win32.SystemEvents.PowerModeChanged += OnPowerModeChanged; }
+            catch (Exception ex) { Log.Write("could not hook power events: " + ex.Message); }
+
             _loop = Task.Run(() => Loop(_cts.Token));
         }
 
@@ -66,6 +109,34 @@ namespace CouchPilot
             }
         }
 
+        /// <summary>
+        /// On resume the poll loop has been frozen, so its remembered controller
+        /// state is stale. Re-read it WITHOUT acting, unless the user has asked
+        /// for a launch when the PC wakes with a pad already on. A resume caused
+        /// by a keyboard would otherwise hijack the TV.
+        /// </summary>
+        private void OnPowerModeChanged(object sender, Microsoft.Win32.PowerModeChangedEventArgs e)
+        {
+            if (e.Mode != Microsoft.Win32.PowerModes.Resume) return;
+
+            try
+            {
+                var pad = Native.AnyControllerConnected();
+                Log.Write($"resumed from sleep, controller present: {pad}");
+
+                if (pad && _cfg.LaunchOnWakeWithController && !Paused)
+                {
+                    _lastControllerState = false; // let the normal path treat it as new
+                    _ = OnControllerSwitchedOn();
+                }
+                else
+                {
+                    _lastControllerState = pad;
+                }
+            }
+            catch (Exception ex) { Log.Write("resume handling failed: " + ex.Message); }
+        }
+
         private async Task OnControllerSwitchedOn()
         {
             var since = (DateTime.Now - _lastTrigger).TotalSeconds;
@@ -75,7 +146,7 @@ namespace CouchPilot
                 return;
             }
             _lastTrigger = DateTime.Now;
-            Log.Write("CONTROLLER ON");
+            Say("Controller on, opening your frontend");
 
             if (!_cfg.LaunchOnControllerConnect) { Log.Write("     launching is disabled"); return; }
 
@@ -209,7 +280,7 @@ namespace CouchPilot
                 _lastControllerState = false;
                 _lastTrigger = DateTime.MinValue;
 
-                Log.Write("suspending now");
+                Say("Going to sleep");
                 Native.Sleep();
                 Log.Write("resumed from sleep");
             }
@@ -237,6 +308,7 @@ namespace CouchPilot
 
         public void Dispose()
         {
+            try { Microsoft.Win32.SystemEvents.PowerModeChanged -= OnPowerModeChanged; } catch { }
             try { _cts.Cancel(); } catch { }
             try { _loop?.Wait(2000); } catch { }
             _cts.Dispose();

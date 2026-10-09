@@ -37,9 +37,16 @@ namespace CouchPilot
             Log.Write("frontend: " + (string.IsNullOrWhiteSpace(_cfg.FrontendPath) ? "(none detected)" : _cfg.FrontendPath));
 
             _engine = new Engine(_cfg);
+            _engine.Notify += m => Notify(m);
             _engine.Start();
 
             BuildTray();
+
+            // First run with nothing detected is the one case where silently
+            // sitting in the tray would look broken, so show the window.
+            if (!_cfg.FirstRunDone || string.IsNullOrWhiteSpace(_cfg.FrontendPath))
+                OpenSettings();
+
             Application.Run();
         }
 
@@ -59,17 +66,22 @@ namespace CouchPilot
 
             menu.Items.Add(new ToolStripSeparator());
 
-            var open = new ToolStripMenuItem("Edit settings");
-            open.Click += (s, e) => OpenInEditor(AppConfig.FilePath);
-            menu.Items.Add(open);
+            var settings = new ToolStripMenuItem("Settings...");
+            settings.Font = new Font(settings.Font, FontStyle.Bold);
+            settings.Click += (s, e) => OpenSettings();
+            menu.Items.Add(settings);
 
-            var reload = new ToolStripMenuItem("Reload settings");
+            var editRaw = new ToolStripMenuItem("Edit config file");
+            editRaw.Click += (s, e) => OpenInEditor(AppConfig.FilePath);
+            menu.Items.Add(editRaw);
+
+            var reload = new ToolStripMenuItem("Reload config file");
             reload.Click += (s, e) =>
             {
                 _cfg = AppConfig.Load();
                 _engine.UpdateConfig(_cfg);
                 ApplyStartWithWindows(_cfg.StartWithWindows);
-                Log.Write("settings reloaded");
+                Log.Write("config reloaded from disk");
                 Notify("Settings reloaded");
                 UpdateTip();
             };
@@ -97,8 +109,38 @@ namespace CouchPilot
                 Visible = true,
                 ContextMenuStrip = menu
             };
-            _tray.DoubleClick += (s, e) => OpenInEditor(AppConfig.FilePath);
+            _tray.DoubleClick += (s, e) => OpenSettings();
             UpdateTip();
+        }
+
+        private static SettingsForm _settingsWindow;
+
+        private static void OpenSettings()
+        {
+            try
+            {
+                if (_settingsWindow != null && !_settingsWindow.IsDisposed)
+                {
+                    _settingsWindow.Activate();
+                    return;
+                }
+
+                _settingsWindow = new SettingsForm(_cfg, _engine, saved =>
+                {
+                    _cfg = saved;
+                    _engine.UpdateConfig(_cfg);
+                    ApplyStartWithWindows(_cfg.StartWithWindows);
+                    UpdateTip();
+                });
+                _settingsWindow.FormClosed += (s, e) => _settingsWindow = null;
+                _settingsWindow.Show();
+                _settingsWindow.Activate();
+            }
+            catch (Exception ex)
+            {
+                Log.Write("could not open settings: " + ex.Message);
+                MessageBox.Show("Could not open the settings window.\n\n" + ex.Message, "CouchPilot");
+            }
         }
 
         private static void UpdateTip()
@@ -114,11 +156,26 @@ namespace CouchPilot
 
         private static void Notify(string message)
         {
+            // The engine raises these from a worker thread; NotifyIcon must be
+            // touched on the UI thread.
             try
             {
-                _tray.BalloonTipTitle = "CouchPilot";
-                _tray.BalloonTipText = message;
-                _tray.ShowBalloonTip(3000);
+                if (_tray == null) return;
+                var show = new Action(() =>
+                {
+                    try
+                    {
+                        _tray.BalloonTipTitle = "CouchPilot";
+                        _tray.BalloonTipText = message;
+                        _tray.ShowBalloonTip(3000);
+                    }
+                    catch { }
+                });
+
+                if (_settingsWindow != null && !_settingsWindow.IsDisposed && _settingsWindow.InvokeRequired)
+                    _settingsWindow.BeginInvoke(show);
+                else
+                    show();
             }
             catch { }
         }
