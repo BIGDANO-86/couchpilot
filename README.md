@@ -1,150 +1,149 @@
 # CouchPilot
 
-Switch your controller on, your game frontend opens. Quit the frontend, your PC
-goes to sleep. Nothing else to touch.
+Switch your controller on, your game frontend opens. Quit it, your PC goes to
+sleep. Nothing else to touch.
 
 Built for couch gaming on a TV, where reaching for a keyboard defeats the point.
 
 ## What it does
 
-- **Controller on → frontend opens.** Works from a cold desktop or from sleep,
+- **Controller on → a frontend opens.** From a cold desktop or from sleep,
   because switching a controller on is what wakes most PCs anyway.
-- **Quit the frontend → PC sleeps.** Only on a deliberate quit, and only if a
-  controller is still connected, so closing it at your desk with a keyboard
+- **More than one frontend? It asks.** A picker you drive with the pad.
+- **Quit the frontend → the PC sleeps.** Only on a deliberate quit, and only if
+  a controller is still connected, so closing it at your desk with a keyboard
   leaves the machine alone.
-- **Optional webhooks** on launch and on exit, for anyone running Home
-  Assistant, Hubitat, Node-RED or similar who also wants their TV handled.
+- **Controller off → optional action.** Run something, or sleep.
+- **Optional webhooks or MQTT** on launch and exit, for anyone running Home
+  Assistant, Hubitat or Node-RED who also wants their TV handled.
 
-Works with **LaunchBox / Big Box**, **Playnite**, and in principle any frontend
-you point it at, including Steam Big Picture and Kodi.
+Finds **Big Box**, **LaunchBox**, **Playnite** (fullscreen and desktop),
+**Steam** and **Steam Big Picture** by itself. Point it at anything else.
 
 ## Install
 
-1. Download `CouchPilot.exe` from [Releases](../../releases).
-2. Run it. It lives in the notification area.
-3. Right-click the tray icon → **Edit settings** if you need to change anything.
+Download from [Releases](../../releases):
 
-No installer, no .NET prerequisite, no admin rights. It adds itself to your
-user's startup so it is there after a reboot; turn that off in the settings.
+- **CouchPilot-Setup-x.y.z.exe** — installer, per user, no admin needed.
+- **CouchPilot.exe** — the bare app, if you would rather not install anything.
+
+No .NET prerequisite either way. It lives in the notification area and adds
+itself to your startup; turn that off in Settings.
 
 > Windows SmartScreen will warn about an unsigned app from an unknown
 > publisher. That is expected for an unsigned binary. Choose *More info* →
-> *Run anyway*, or check the source and build it yourself.
+> *Run anyway*, or read the source and build it yourself.
+
+## The picker
+
+When more than one frontend is ticked, switching your controller on brings up a
+chooser. It is driveable from the pad, because the entire point of this app is
+that you have not picked up a keyboard:
+
+| Input | Does |
+| --- | --- |
+| D-pad or left stick | Move |
+| **A** or **Start** | Open it |
+| **B** or **Escape** | Cancel, open nothing |
+| Wait | Opens the default by itself |
+
+It ignores input for the first moment, so the button that woke the PC does not
+instantly choose for you. Touch the d-pad and the countdown stops, so it never
+snatches the decision mid-thought. Set the timeout to 0 to wait forever.
 
 ## Settings
 
-Right-click the tray icon → **Settings**, or double-click the icon. The window
-opens by itself the first time, and any time no frontend could be detected.
+Right-click the tray icon → **Settings**, or double-click it. The window opens
+by itself on first run, or whenever no frontend could be found.
 
-It shows live status while you work: whether a controller is connected right
-now, whether the frontend is running, whether your controller is armed to wake
-the PC, and which sleep state your machine actually supports. There are **Try
-it** buttons for launching and sleeping, and a **Test** button on each webhook,
-so you can confirm everything without waiting for the real thing to happen.
+- **Frontends** — tick which to offer, set the default, reorder, add your own,
+  and **Open it** to test one immediately.
+- **Behaviour** — every toggle and timing value, including the disconnect action.
+- **Integrations** — webhooks and MQTT, each with a **Test** button.
+- **Controller wake** — see below.
+- **Status** — live: controller connected, frontend running, wake armed, and
+  which sleep state this machine actually supports.
 
-Everything is still plain JSON at `%APPDATA%\CouchPilot\config.json` if you
-prefer, with **Reload config file** on the tray menu to pick up hand edits.
+It is all plain JSON at `%APPDATA%\CouchPilot\config.json` if you prefer, with
+**Reload config file** on the tray menu to pick up hand edits.
 
-| Setting | Default | What it does |
-| --- | --- | --- |
-| `FrontendPath` | auto-detected | The frontend to launch. |
-| `WatchProcessName` | derived | The long-lived process to watch, without `.exe`. See the note below. |
-| `LaunchOnControllerConnect` | `true` | Launch when a controller is switched on. |
-| `SleepOnFrontendExit` | `true` | Sleep the PC when the frontend quits. |
-| `RequireCleanExit` | `true` | Only sleep on exit code 0, so a crash does not sleep the PC. |
-| `RequireControllerForSleep` | `true` | Only sleep if a controller is still connected. |
-| `MinimumRunSeconds` | `30` | Ignore an exit sooner than this, to dodge crash loops. |
-| `SleepDelaySeconds` | `6` | Pause before sleeping, so shutdown screens and webhooks finish. |
-| `ControllerPollSeconds` | `2` | How often to check for controllers. |
-| `CooldownSeconds` | `45` | Ignore repeat triggers inside this window. |
-| `WebhookOnLaunch` | empty | POSTed when a launch is triggered. |
-| `WebhookOnExit` | empty | POSTed when the frontend quits. |
-| `StartWithWindows` | `true` | Adds a `Run` key entry for your user. |
-| `ShowNotifications` | `true` | Brief tray notification when something happens. |
-| `LaunchOnWakeWithController` | `false` | Also launch if the PC resumes with a pad already on. See below. |
+### Why "watch process" exists
 
-### Why `WatchProcessName` exists
-
-LaunchBox ships a small `BigBox.exe` stub in its root folder that starts the
-real binary and can exit straight away. Watching the stub looks like you quit
-immediately. CouchPilot tracks the long-lived process instead. Big Box and
-Playnite are handled automatically; set this yourself for anything unusual.
-
-## How "deliberate quit" is decided
-
-CouchPilot holds a handle on the frontend process and reads its **exit code**.
-A clean quit returns 0; a crash or a kill does not. That keeps it frontend
-agnostic, with no plugin to install.
-
-Both Big Box and Playnite do expose an exact shutdown event
-(`BigBoxShutdownBeginning` and `OnApplicationStopped`), and optional plugins
-using them may ship later for people who want the precise signal. The exit code
-covers it without one.
+Some launchers are small stubs that start the real binary and exit immediately.
+LaunchBox's `BigBox.exe` is one. Watching the stub looks like quitting a second
+after opening, so CouchPilot tracks the long-lived process instead. The known
+ones are handled for you; set it yourself for anything unusual.
 
 ## Controller wake
 
 Waking a sleeping PC with a controller is widely assumed to be purely a
-hardware trait. It is not. The device must also be **armed** in Windows, and it
+hardware trait. It is not. The receiver must also be **armed** in Windows, and
 often is not by default.
 
-CouchPilot reports the state and can fix it: **Settings → Set up controller
-wake**. It finds receivers that are capable of waking the PC but not armed, and
-arms them with `powercfg -deviceenablewake`. Windows asks for administrator
-rights for that one action, which is why the app itself does not run elevated.
+**Settings → Controller wake → Set up controller wake** finds receivers that can
+wake the PC but are not armed, and arms them with `powercfg -deviceenablewake`.
+Windows asks for administrator rights for that one action, which is why the app
+itself does not run elevated.
 
-Things that genuinely are hardware limits:
+Genuine hardware limits:
 
 - Wired pads usually cannot wake a PC at all.
 - An **Xbox Wireless Adapter** or a Bluetooth receiver generally can.
-- Some motherboards gate it behind a BIOS option, often called *USB wake* or
-  *wake on USB*. If arming succeeds but nothing happens, check there.
+- Some motherboards gate it behind a BIOS option called *USB wake* or *wake on
+  USB*. If arming succeeds and nothing happens, look there.
 
-**Modern Standby** machines, which report `S0 Low Power Idle` rather than
-`Standby (S3)`, never fully sleep and behave differently. The settings window
-tells you which kind you have.
+**Modern Standby** machines, reporting `S0 Low Power Idle` rather than
+`Standby (S3)`, never fully sleep and behave differently. The Status page tells
+you which kind you have.
 
-### Why waking is a separate thing from launching
+### Waking is separate from launching
 
-On a normal controller wake, the pad goes from absent to present, which is what
-triggers a launch. That works because sleeping deliberately re-arms that
-baseline first.
+On a normal controller wake the pad goes from absent to present, which is the
+trigger. That works because sleeping deliberately re-arms that baseline first.
 
-`LaunchOnWakeWithController` covers a different case: the PC resumes for some
-other reason while a pad happens to already be connected. It is **off** by
-default on purpose, because otherwise waking the machine with a keyboard at
-your desk would switch your TV over and open your frontend uninvited.
+`Also open if the PC wakes with a pad already on` covers a different case: the
+PC resumes for some other reason while a pad happens to be connected. It is
+**off** by default, because otherwise waking at your desk with a keyboard would
+switch your TV over and open a frontend uninvited.
+
+## How "deliberate quit" is decided
+
+CouchPilot holds a handle on the frontend process and reads its **exit code**. A
+clean quit returns 0; a crash or a kill does not. That keeps it frontend
+agnostic, with no plugin to install.
+
+Both Big Box and Playnite do expose exact shutdown events
+(`BigBoxShutdownBeginning`, `OnApplicationStopped`). Optional plugins using them
+may ship later for anyone wanting a more precise signal than an exit code.
+
+## Home Assistant and friends
+
+Two ways, use either or both:
+
+**Webhooks.** Put your webhook URL in Settings → Integrations. CouchPilot POSTs
+to it on launch and on exit.
+
+**MQTT.** Broker address, credentials, and a topic and payload for each event.
+It connects only to publish rather than holding a session open, since a handful
+of messages a day does not justify reconnect handling or a socket kept alive
+across sleep.
+
+Neither is required. Leave both blank and CouchPilot never touches the network.
 
 ## Troubleshooting
 
 The log is at `%APPDATA%\CouchPilot\couchpilot.log`, reachable from the tray
-menu. Every controller transition, launch, exit code and webhook result is
-recorded with a timestamp, because almost everything this app does happens while
-nobody is looking at the screen.
+menu. Every controller transition, launch, exit code, webhook and MQTT publish
+is timestamped, because almost everything this app does happens while nobody is
+looking at the screen.
 
 | Symptom | Likely cause |
 | --- | --- |
-| Nothing happens when the controller comes on | It was already on. It fires on the transition, not on presence. Switch it off, wait, switch it on. |
+| Nothing happens when the pad comes on | It was already on. It fires on the transition, not on presence. Switch it off, wait, switch it on. |
 | PC does not sleep on quit | Check the log for the exit code. A non-zero code is treated as a crash by default. |
-| Frontend opens at every boot | A controller connected at startup is deliberately ignored; if it still happens, check the log for the baseline line. |
-
-## Ideas not yet built
-
-Open to opinions on which of these are actually worth having:
-
-- **Sleep from the pad.** Hold a button combination, say Back and Start for
-  three seconds, to sleep without reaching for the frontend's exit. Removes the
-  last reason to touch a keyboard.
-- **Do not sleep while a game is running.** Big Box and Playnite minimise
-  behind a game rather than exiting, so this is only a safeguard for odd setups.
-- **Several frontends.** Pick which one to open, or offer a chooser when a pad
-  connects.
-- **Update check** against this repo's releases, with a tray prompt.
-- **Launch something when the pad disconnects**, for people who want the
-  opposite behaviour.
-- **MQTT** as an alternative to webhooks, for Home Assistant users who prefer it.
-- **Per-frontend plugins** using the exact shutdown events
-  (`BigBoxShutdownBeginning`, `OnApplicationStopped`) for anyone who wants a
-  signal more precise than an exit code.
+| Frontend opens at every boot | A pad connected at startup is deliberately ignored. The log records the baseline at start. |
+| The picker chose for me | That is the timeout. Raise it, or set it to 0 to wait forever. |
+| Quitting one frontend sleeps the PC while another is running | Turn off *Sleep the PC* or raise the minimum run time. |
 
 ## Build it yourself
 
@@ -153,6 +152,17 @@ dotnet publish CouchPilot.csproj -c Release -o publish
 ```
 
 Needs the .NET 8 SDK. Output is a single self-contained `publish/CouchPilot.exe`.
+CI builds the same thing, plus the installer, on every push.
+
+## Ideas not yet built
+
+- **Sleep from the pad.** Hold Back and Start for a few seconds to sleep without
+  going back to the frontend's exit screen.
+- **Do not sleep while a game is running**, as a safeguard for unusual setups.
+- **Update check** against this repo's releases.
+- **Per-frontend plugins** using the exact shutdown events.
+- **Steam Big Picture detection** of whether Big Picture specifically is open,
+  rather than Steam generally.
 
 ## Licence
 
