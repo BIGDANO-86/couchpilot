@@ -107,7 +107,7 @@ namespace CouchPilot
 
             if (cfg.Frontends.Count == 0)
             {
-                cfg.Frontends = Frontends.DetectAll();
+                cfg.Frontends = FrontendCatalog.DetectAll();
                 Log.Write($"detected {cfg.Frontends.Count} frontend(s)");
             }
 

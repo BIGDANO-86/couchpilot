@@ -65,9 +65,9 @@ namespace CouchPilot
                 switch (e.KeyCode)
                 {
                     case Keys.Left:
-                    case Keys.Up: Move(-1); break;
+                    case Keys.Up: MoveSelection(-1); break;
                     case Keys.Right:
-                    case Keys.Down: Move(1); break;
+                    case Keys.Down: MoveSelection(1); break;
                     case Keys.Enter:
                     case Keys.Space: Accept(); break;
                     case Keys.Escape: Cancel(); break;
@@ -114,11 +114,11 @@ namespace CouchPilot
                 // through the whole list in a fraction of a second.
                 bool Pressed(PadButton b) => buttons.HasFlag(b) && !_lastButtons.HasFlag(b);
 
-                if (Pressed(PadButton.DPadRight) || Pressed(PadButton.DPadDown)) Move(1);
-                else if (Pressed(PadButton.DPadLeft) || Pressed(PadButton.DPadUp)) Move(-1);
+                if (Pressed(PadButton.DPadRight) || Pressed(PadButton.DPadDown)) MoveSelection(1);
+                else if (Pressed(PadButton.DPadLeft) || Pressed(PadButton.DPadUp)) MoveSelection(-1);
 
-                if (sx != 0 && _lastStickX == 0) Move(sx > 0 ? 1 : -1);
-                else if (sy != 0 && _lastStickY == 0) Move(sy > 0 ? -1 : 1);
+                if (sx != 0 && _lastStickX == 0) MoveSelection(sx > 0 ? 1 : -1);
+                else if (sy != 0 && _lastStickY == 0) MoveSelection(sy > 0 ? -1 : 1);
 
                 // Ignore the first moment so the button that woke the PC, still
                 // held as the window appears, does not instantly pick something.
@@ -134,7 +134,7 @@ namespace CouchPilot
             catch { }
         }
 
-        private void Move(int delta)
+        private void MoveSelection(int delta)
         {
             if (_items.Count == 0) return;
             _index = (_index + delta + _items.Count) % _items.Count;

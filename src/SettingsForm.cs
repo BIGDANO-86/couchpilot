@@ -381,7 +381,7 @@ namespace CouchPilot
 
         private void Redetect()
         {
-            var found = Frontends.DetectAll();
+            var found = FrontendCatalog.DetectAll();
             var added = 0;
             foreach (var f in found)
             {

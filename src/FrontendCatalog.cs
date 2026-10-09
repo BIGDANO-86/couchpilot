@@ -44,7 +44,7 @@ namespace CouchPilot
     /// launch arguments and the process that genuinely stays alive, so the
     /// quit detection works without the user knowing any of this.
     /// </summary>
-    internal static class Frontends
+    internal static class FrontendCatalog
     {
         public static List<FrontendEntry> DetectAll()
         {
